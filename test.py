@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 
 import Heroes
 import matplotlib.pyplot as plt
@@ -8,22 +7,31 @@ from sklearn import preprocessing
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.cross_validation import train_test_split
-import seaborn as sns
+import operator
 
 #class hero:
 #   def _init_(self, name, hero_id, side):
 #       self.name = name
 #       self.hero_id = hero_id
 #       self.side = side
+
+######################################################################################################################################################
+
+GLOBALHEROWINRATES_SOLO = np.zeros(len(Heroes.heroes), dtype = (float, 6))                              # 1-d array of solo winrates
+GLOBALHEROWINRATES_DUO = np.zeros((len(Heroes.heroes), len(Heroes.heroes)), dtype = (float, 6))         # 2-d array for duo winrates
+                                                                                                        # GLOBALHEROWINRATES_DUO is a bottom-triangle square matrix
+GLOBALHEROWINRATES_ENEMIES = np.zeros((len(Heroes.heroes), len(Heroes.heroes)), dtype = (float, 6))     # matrix of winrates when heroes play 1vs1
+
+######################################################################################################################################################
 class dota2match:
-    def __init__(self, game_id, data, winner, cluster_id, game_mod, game_type, radiant_team, dire_team):
+    def __init__(self, game_id, data, winner, cluster_id, game_mode, game_type, radiant_team, dire_team):
         self.game_id = game_id
         self.data = data
         self.winner = winner    # TRUE for radiant or FALSE for dire
         self.cluster_id = cluster_id    # server id (or idk)
-        self.game_mod = game_mod
+        self.game_mode = game_mode
         self.game_type = game_type
-        self.radiant_team = radiant_team    # [(hero_id, is_sup, lane), ...] - from Heroes.heroes
+        self.radiant_team = radiant_team    # [ (hero_id, is_sup, lane), ... ] - from Heroes.heroes
                                                 # is_sup - if hero playes a supportive role (TRUE FALSE)
                                                 # line: 0-roaming, 1-safelane, 2-mid, 3-offlane, 4-jungle
         self.dire_team = dire_team  # same as heroes_radiant
@@ -85,7 +93,7 @@ def CreateHeroesDataBase():     # checked
 ######################################################################################################################################################
 def LoadDota2Matches(filepath):     # checked
     """
-    loads information about mathes from a file
+    loads information about matches from a file
     filepath - path to a file
 
     return value - list of objects woth a tyupe dota2match
@@ -148,7 +156,7 @@ def GenerateSubGroups(radiant_team, dire_team):     # checked
     return [(radiant_group_top, dire_group_top), (radiant_group_mid, dire_group_mid), (radiant_group_bot, dire_group_bot)]
 
 ######################################################################################################################################################
-def SetEasyStrength(GLOBALHEROWINRATES, group_a, group_b):      # checked
+def SetEasyStrength(group_a, group_b):      # checked
     """
     group_a - list of tuples: [(hero_id, is_sup, lane), ...] , look hero_id's in Heroes.heroes
     group_b - same as group_a
@@ -158,54 +166,90 @@ def SetEasyStrength(GLOBALHEROWINRATES, group_a, group_b):      # checked
     return value - tuple: (win_chance_1, win_chance_2), win_chance_i - chance to win. summ = 1
     mb second one is better. we will see
     """
+    global GLOBALHEROWINRATES_SOLO
+    global GLOBALHEROWINRATES_DUO
+
     all_hero_parameters = ['push', 'nuker', 'disabler', 'initiator', 'carry', 'escape', 'durable', 'jungler', 'outpush']
     mask = ['outpush', 'nuker', 'initiator', 'disabler']
     
-    strength_a = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(group_a, key = lambda h: h[1])]
-    strength_b = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(group_b, key = lambda h: h[1])]
+    strength_a = [GLOBALHEROWINRATES_SOLO[h[0]][0] for h in sorted(group_a, key = lambda h: h[1])]
+    strength_b = [GLOBALHEROWINRATES_SOLO[h[0]][0] for h in sorted(group_b, key = lambda h: h[1])]
     #indexes_a = [[Heroes.heroes[h[0]][k]] for h in sorted(group_a, key = lambda h: h[1]) for k in mask]
     #indexes_b = [[Heroes.heroes[h[0]][k]] for h in sorted(group_b, key = lambda h: h[1]) for k in mask]
     
     summ_strength_a = 1
     for w in strength_a:
-        summ_strength_a = summ_strength_a * w     # chance to fail
-    #summ_strength_a = 1 - summ_strength_a       # chance not to fail
+        summ_strength_a = summ_strength_a * (1 - w)
+
     summ_strength_b = 1
     for w in strength_b:
-        summ_strength_b = summ_strength_b * w     # chance to fail
-    #summ_strength_b = 1 - summ_strength_b       # chance not to fail
+        summ_strength_b = summ_strength_b * (1 - w)
 
-    result = (summ_strength_a, summ_strength_b)
+    result = (1 - summ_strength_a, 1 - summ_strength_b)
     return result
 
-def SetEasyStrength2(GLOBALHEROWINRATES, group_a, group_b): 
+def SetHardStrength(group_a, group_b, balance = 0):
     """
-    tests of a function above
+    same as function above
+
+    balance value shows if we use info, that radiant wins more often
     """
-    mask = ['outpush']
-    strength_a = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(group_a, key = lambda h: h[1])]
-    strength_b = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(group_b, key = lambda h: h[1])]
-    #indexes_a = [[Heroes.heroes[h[0]][k]] for h in sorted(group_a, key = lambda h: h[1]) for k in mask]
-    #indexes_b = [[Heroes.heroes[h[0]][k]] for h in sorted(group_b, key = lambda h: h[1]) for k in mask]
-    
-    summ_strength_a = 1
-    for w in strength_a:
-        summ_strength_a = summ_strength_a * (1 - w)     # chance to fail
-    summ_strength_a = 1 - summ_strength_a       # chance not to fail
-    summ_strength_b = 1
-    for w in strength_b:
-        summ_strength_b = summ_strength_b * (1 - w)     # chance to fail
-    summ_strength_b = 1 - summ_strength_b       # chance not to fail
+    if balance != 0 and balance != 1:
+        raise ValueError("wrong value for balance variable. Use '0' for not considering radiant_wr > dire_wr. Use '1' otherwises")
 
-    result = (summ_strength_a, summ_strength_b)
+    global GLOBALHEROWINRATES_SOLO
+    global GLOBALHEROWINRATES_DUO
 
+    strength_a = 0
+    strength_b = 0
+
+    if len(group_a) == 0:
+        pass
+    elif len(group_a) == 1:
+        strength_a = GLOBALHEROWINRATES_SOLO[group_a[0][0]][balance * 2]
+    elif len(group_a) == 2:
+        group_a = sorted(group_a, key = lambda h: h[0])
+        strength_a = GLOBALHEROWINRATES_DUO[group_a[1][0]][group_a[0][0]][balance * 2]
+        if strength_a == 0:
+            strength_a = GLOBALHEROWINRATES_DUO[group_a[0][0]][group_a[1][0]][balance * 2]
+    elif len(group_a) == 3:
+        group_a = sorted(group_a, key = lambda h: h[1])
+        strength_a = GLOBALHEROWINRATES_DUO[ group_a[1][0] ][ group_a[2][0] ][balance * 2]
+        if strength_a == 0:
+            strength_a = GLOBALHEROWINRATES_DUO[group_a[2][0]][group_a[1][0]][balance * 2]
+    elif len(group_a) > 3:
+        #raise ValueError("How did you managed to find more then 3 people on the same lane!?")
+        #strength_a = 1
+        pass
+        strength_a = 0.52
+    if len(group_b) == 0:
+        pass
+    elif len(group_b) == 1:
+        strength_b = GLOBALHEROWINRATES_SOLO[group_b[0][0]][balance * 4]
+    elif len(group_b) == 2:
+        group_b = sorted(group_b, key = lambda h: h[0])
+        strength_b = GLOBALHEROWINRATES_DUO[group_b[1][0]][group_b[0][0]][balance * 4]
+        if strength_b == 0:
+            strength_b = GLOBALHEROWINRATES_DUO[group_b[0][0]][group_b[1][0]][balance * 4]
+    elif len(group_b) == 3:
+        group_b = sorted(group_b, key = lambda h: h[1])
+        strength_b = GLOBALHEROWINRATES_DUO[group_b[1][0]][group_b[2][0]][balance * 4]
+        if strength_b == 0:
+            strength_b = GLOBALHEROWINRATES_DUO[group_b[2][0]][group_b[1][0]][balance * 4]
+    elif len(group_b) > 3:
+        #raise ValueError("How did you managed to find more then 3 people on the same lane!?")
+        #strength_b = 1
+        pass
+        strength_b = 0.48
+
+    result = (strength_a * len(group_a), strength_b * len(group_b))
     return result
 
 ######################################################################################################################################################
-def MergeGroups(all_groups, all_winchances):
+def MergeGroups(all_groups, groups_winchances):
     """
     all_groups - list. look at return value of GenerateSubGroups()
-    all_winchances - list. look at return value of SetEasyStrength()
+    groups_winchances - list. look at return value of SetEasyStrength()
 
     return value - tuple: (strength_1, strength_2), strength_i  - unnormalized chance to win
     or
@@ -257,19 +301,21 @@ def SumHeroesFeatures(features_dict, keys = Heroes.heroes[0].keys()):     # chec
     return result
 
 ######################################################################################################################################################
-def GetFeatures(all_matches, match, GLOBALHEROWINRATES = [], mod = -1):
+def GetFeatures(match, mode = -1):     # currently this function is a rubbish bin. sorry
     """
     match - object with a type 'dota2match'
 
     return value - list of features (integer ordered values)
     """
+    global GLOBALHEROWINRATES_SOLO
+    global GLOBALHEROWINRATES_DUO
     result = 0
 
-    if mod == 0:    # metod 0. features = random numbers
+    if mode == 0:    # method 0. features = random numbers
         result = [random.randint(0, 5) for i in range(5)]
         return result
     
-    elif mod == 1:    # metod 1. features = summ of masked parameters for the whole team
+    elif mode == 1:    # method 1. features = summ of masked parameters for the whole team
         all_hero_parameters = ['push', 'nuker', 'disabler', 'initiator', 'carry', 'escape', 'durable', 'jungler', 'outpush']
         mask = ['outpush', 'nuker', 'initiator', 'disabler']
         rt = GetHeroesFeatures(match.radiant_team, mask)
@@ -277,31 +323,31 @@ def GetFeatures(all_matches, match, GLOBALHEROWINRATES = [], mod = -1):
         result = [rt[k] for k in rt.keys()] + [dt[k] for k in dt.keys()]
         return result
     
-    elif mod == 2:    # metod 2. features = winrates for all orderd team members
-        rt = [GLOBALHEROWINRATES[h[0] - 1][2] for h in sorted(match.radiant_team, key = lambda h: h[2])]
-        dt = [GLOBALHEROWINRATES[h[0] - 1][4] for h in sorted(match.dire_team, key = lambda h: h[2])]
+    elif mode == 2:    # method 2. features = winrates for all orderd team members
+        rt = [GLOBALHEROWINRATES_SOLO[h[0]][2] for h in sorted(match.radiant_team, key = lambda h: h[2])]
+        dt = [GLOBALHEROWINRATES_SOLO[h[0]][4] for h in sorted(match.dire_team, key = lambda h: h[2])]
         result = rt + dt
         return result
 
-    elif mod == 3:   # metod 3. heroes' interection is taken into consideration
+    elif mode == 3:   # method 3. heroes' interection is taken into consideration
+                     # currently it's not a method - it's a rubbbish bin
         subgroups = GenerateSubGroups(match.radiant_team, match.dire_team)
-        features2 = [SetEasyStrength2(GLOBALHEROWINRATES, sg[0], sg[1]) for sg in subgroups]
-        features1 = [SetEasyStrength(GLOBALHEROWINRATES, sg[0], sg[1]) for sg in subgroups]
+        features1 = [SetEasyStrength(sg[0], sg[1]) for sg in subgroups]
         rt1 = [f[0] for f in features1]
         dt1 = [f[1] for f in features1]
-        rt2 = [f[0] for f in features2]
-        dt2 = [f[1] for f in features2]
-        rt = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(match.radiant_team, key = lambda h: h[2])]
-        dt = [GLOBALHEROWINRATES[h[0] - 1][0] for h in sorted(match.dire_team, key = lambda h: h[2])]
+        rt = [GLOBALHEROWINRATES_SOLO[h[0]][0] for h in sorted(match.radiant_team, key = lambda h: h[2])]
+        dt = [GLOBALHEROWINRATES_SOLO[h[0]][0] for h in sorted(match.dire_team, key = lambda h: h[2])]
 
         mask = ['outpush', 'nuker', 'initiator', 'disabler']
+        #rt3 = [SumHeroesFeatures(GetHeroesFeatures(match.radiant_team, mask), mask)]
+        #dt3 = [SumHeroesFeatures(GetHeroesFeatures(match.dire_team, mask), mask)]
         rt3 = [GetHeroesFeatures(match.radiant_team, mask)[k] for k in mask]
         dt3 = [GetHeroesFeatures(match.dire_team, mask)[k] for k in mask]
 
-        result = rt + dt + rt1 + dt1 + rt3 + dt3
+        result = rt + dt + rt3 + dt3 #+ rt3 + dt3
         return result
 
-    elif mod == 4:    # metod 4. features = all masked parameters for every hero in match
+    elif mode == 4:    # metod 4. features = all masked parameters for every hero in match
         all_hero_parameters = ['push', 'nuker', 'disabler', 'initiator', 'carry', 'escape', 'durable', 'jungler', 'outpush']
         mask = ['outpush', 'nuker', 'initiator', 'disabler']
         rt = [GetHeroesFeatures([h], mask) for h in match.radiant_team]
@@ -309,8 +355,38 @@ def GetFeatures(all_matches, match, GLOBALHEROWINRATES = [], mod = -1):
         result = [rt[i][k] for i in range(5) for k in rt[0].keys()] + [dt[i][k] for i in range(5) for k in dt[0].keys()]
         return result
 
+    elif mode == 5:
+        balance = 0
+        subgroups = GenerateSubGroups(match.radiant_team, match.dire_team)
+        features1 = [SetHardStrength(sg[0], sg[1], balance) for sg in subgroups]
+        rt1 = [f[0] for f in features1]
+        dt1 = [f[1] for f in features1]
+
+        match.radiant_team.sort(key = operator.itemgetter(2, 1))
+        match.dire_team.sort(key = operator.itemgetter(2, 1))
+        rt2 = [GLOBALHEROWINRATES_SOLO[h[0]][2 * balance] for h in match.radiant_team]
+        dt2 = [GLOBALHEROWINRATES_SOLO[h[0]][4 * balance] for h in match.dire_team]
+
+        result = rt1 + dt1 + rt2 + dt2
+        return result
+    elif mode == 6:
+        balance = 0
+        match.radiant_team.sort(key = operator.itemgetter(2, 1))
+        match.dire_team.sort(key = operator.itemgetter(2, 1))
+        result1 = [ GLOBALHEROWINRATES_ENEMIES[h1[0]][h2[0]][2 * balance] for h1 in match.radiant_team for h2 in match.dire_team ]
+
+        mask = ['outpush', 'nuker']
+        rt = [GetHeroesFeatures([h], mask) for h in match.radiant_team]
+        dt = [GetHeroesFeatures([h], mask) for h in match.dire_team]
+        result2 = [rt[i][k] for i in range(5) for k in rt[0].keys()] + [dt[i][k] for i in range(5) for k in dt[0].keys()]
+        
+        return result1 + result2
     else:
-        raise ValueError("wrong value for argument mod. suggested: 0, 1, 2. current: {0}".format(mod))
+        raise ValueError("wrong value for argument mode. suggested: 0, 1, 2. current: {0}".format(mode))
+
+        """
+        s.sort(key = operator.itemgetter(1, 2))
+        """
 
 ######################################################################################################################################################
 def CheckWinRate(all_matches, group_a, group_b):
@@ -404,19 +480,124 @@ def PredictWinNaive(all_matches, team_radiant, team_dire, max_group_size):
     #return float(sum(winrates_processed)) / len(winrates_processed)
     return reduce(lambda x, y: x + y, winrates_processed) / len(winrates_processed)
 
+def HandleGlobalVariables(all_matches, mode = 'all'):
+    """
+    function initializes globbal variables GLOBALHEROWINRATES
+    function sets their values to 1-d and 2-d arrays
+    """
+    global GLOBALHEROWINRATES_SOLO
+    global GLOBALHEROWINRATES_DUO
+    global GLOBALHEROWINRATES_ENEMIES
+
+    if mode == 'solo' or 'all':
+
+        for a in GLOBALHEROWINRATES_SOLO:
+            a = [0, 0, 0, 0, 0, 0]      # [winrate, matches_played_with_this_heroes, wr_radiant, games_radiant, wr_dire, games_dire]
+        
+        for m in all_matches:
+            for  i in range(5):
+                
+                GLOBALHEROWINRATES_SOLO[m.radiant_team[i][0]][1] += 1
+                GLOBALHEROWINRATES_SOLO[m.radiant_team[i][0]][3] += 1
+                if m.winner == 'TRUE':
+                    GLOBALHEROWINRATES_SOLO[m.radiant_team[i][0]][0] += 1
+                    GLOBALHEROWINRATES_SOLO[m.radiant_team[i][0]][2] += 1
+
+                GLOBALHEROWINRATES_SOLO[m.dire_team[i][0]][1] += 1
+                GLOBALHEROWINRATES_SOLO[m.dire_team[i][0]][5] += 1
+                if m.winner == 'FALSE':
+                    GLOBALHEROWINRATES_SOLO[m.dire_team[i][0]][0] += 1
+                    GLOBALHEROWINRATES_SOLO[m.dire_team[i][0]][4] += 1
+        
+        for a in GLOBALHEROWINRATES_SOLO:
+            if a[1] != 0:
+                a[0] = float(a[0]) / a[1]
+            if a[3] != 0:
+                a[2] = float(a[2]) / a[3]
+            if a[5] != 0:
+                a[4] = float(a[4]) / a[5]
+
+    elif mode == 'duo' or 'all':
+       
+        for a in GLOBALHEROWINRATES_DUO:
+            a = [0, 0, 0, 0, 0, 0]      # [winrate, matches_played_with_this_heroes, wr_radiant, games_radiant, wr_dire, games_dire]
+
+        for m in all_matches:
+            for i1 in range(5):
+                for i2 in range(i1):
+
+                    GLOBALHEROWINRATES_DUO[m.radiant_team[i1][0]][m.radiant_team[i2][0]][1] += 1
+                    GLOBALHEROWINRATES_DUO[m.radiant_team[i1][0]][m.radiant_team[i2][0]][3] += 1
+                    if m.winner == 'TRUE':
+                        GLOBALHEROWINRATES_DUO[m.radiant_team[i1][0]][m.radiant_team[i2][0]][0] += 1
+                        GLOBALHEROWINRATES_DUO[m.radiant_team[i1][0]][m.radiant_team[i2][0]][2] += 1
+
+                    GLOBALHEROWINRATES_DUO[m.dire_team[i1][0]][m.dire_team[i2][0]][1] += 1
+                    GLOBALHEROWINRATES_DUO[m.dire_team[i1][0]][m.dire_team[i2][0]][5] += 1
+                    if m.winner == 'FALSE':
+                        GLOBALHEROWINRATES_DUO[m.dire_team[i1][0]][m.dire_team[i2][0]][0] += 1
+                        GLOBALHEROWINRATES_DUO[m.dire_team[i1][0]][m.dire_team[i2][0]][4] += 1
+        
+        for b in GLOBALHEROWINRATES_DUO:
+            for a in b:    
+                if a[1] != 0:
+                    a[0] = float(a[0]) / a[1]
+                if a[3] != 0:
+                    a[2] = float(a[2]) / a[3]
+                if a[5] != 0:
+                    a[4] = float(a[4]) / a[5]
+
+    elif mode == 'enemies' or 'all':
+       
+        for a in GLOBALHEROWINRATES_ENEMIES:
+            a = [0, 0, 0, 0, 0, 0]      # [winrate, matches_played_with_this_heroes, wr_radiant, games_radiant, wr_dire, games_dire]
+
+        for m in all_matches:
+            for i1 in range(5):
+                for i2 in range(5):
+                    
+                    GLOBALHEROWINRATES_ENEMIES[m.radiant_team[i1][0]][m.dire_team[i2][0]][1] += 1
+                    GLOBALHEROWINRATES_ENEMIES[m.radiant_team[i1][0]][m.dire_team[i2][0]][3] += 1
+                    GLOBALHEROWINRATES_ENEMIES[m.dire_team[i2][0]][m.radiant_team[i1][0]][1] += 1
+                    GLOBALHEROWINRATES_ENEMIES[m.dire_team[i2][0]][m.radiant_team[i1][0]][5] += 1
+                    if m.winner == 'TRUE':
+                        GLOBALHEROWINRATES_ENEMIES[m.radiant_team[i1][0]][m.dire_team[i2][0]][0] += 1
+                        GLOBALHEROWINRATES_ENEMIES[m.radiant_team[i1][0]][m.radiant_team[i2][0]][2] += 1
+                        
+                    if m.winner == 'FALSE':
+                        GLOBALHEROWINRATES_ENEMIES[m.dire_team[i2][0]][m.radiant_team[i1][0]][0] += 1
+                        GLOBALHEROWINRATES_ENEMIES[m.dire_team[i2][0]][m.radiant_team[i1][0]][4] += 1
+                    
+        for b in GLOBALHEROWINRATES_ENEMIES:
+            for a in b:    
+                if a[1] != 0:
+                    a[0] = float(a[0]) / a[1]
+                if a[3] != 0:
+                    a[2] = float(a[2]) / a[3]
+                if a[5] != 0:
+                    a[4] = float(a[4]) / a[5]
+
+    else:
+        raise ValueError("wrong value for argument mode. suggested: 'solo', 'duo', 'enemy', 'all'. current: {0}".format(mode)) 
+
+
 ######################################################################################################################################################
-def CheckHeroesDistribution(all_matches, mod = 'winrate'):
+######################################################################################################################################################
+######################################################################################################################################################
+######################################################################################################################################################
+######################################################################################################################################################
+def CheckHeroesDistribution(all_matches, mode = 'winrate'):
     """
     temporary function, helps to visualize information
     draws a plot wich show heroes' pick frequency or winrate
     """
     m = 0
-    if mod == 'winrate':
+    if mode == 'winrate':
         m = 0
-    elif mod == 'total':
+    elif mode == 'total':
         m = 1
     else:
-        raise ValueError('wrong value for mod argument. suggested: winrate, total')
+        raise ValueError('wrong value for mode argument. suggested: winrate, total')
 
     games_played = [CheckWinRate(all_matches, [(i + 1, -1, -1)], [])[m] for i in range(len(Heroes.heroes))]
     games_played.sort()
@@ -539,24 +720,25 @@ def main():
     # reading data and creating all needed structures. takes approximately 5-6 seconds (on my laptop)
     dota2matches = LoadDota2Matches(filepath = 'Dataset/Matches.txt')
     print "Numbber of mathes: ", len(dota2matches)
-    dota2matches_train, dota2matches_test = train_test_split(dota2matches, test_size = 0.20)
-    GLOBALHEROWINRATES = []
+
+    dota2matches_train, dota2matches_test = train_test_split(dota2matches, test_size = 0.05)
     
-    print "matches splited"
-    GLOBALHEROWINRATES = [CheckWinRate(dota2matches_train, [(h['id'], 'FALSE', 0)], []) for h in Heroes.heroes if h['id'] != 'ID']
-    data_train = np.array([GetFeatures(dota2matches_train, m, GLOBALHEROWINRATES, 3) for m in dota2matches_train])
+    print "features genegetion is started"
+    HandleGlobalVariables(dota2matches_train, mode = 'solo')
+    HandleGlobalVariables(dota2matches_train, mode = 'duo')
+    #HandleGlobalVariables(dota2matches_train, mode = 'enemies')
+    data_train = np.array([GetFeatures(m, 5) for m in dota2matches_train])
     print "train created"
-    GLOBALHEROWINRATES = [CheckWinRate(dota2matches, [(h['id'], 'FALSE', 0)], []) for h in Heroes.heroes if h['id'] != 'ID']
-    data_test = np.array([GetFeatures(dota2matches_test, m, GLOBALHEROWINRATES, 3) for m in dota2matches_test])
+    data_test = np.array([GetFeatures(m, 5) for m in dota2matches_test])
     print "test created"
-    """
-    data = data.T
-    corr = np.corrcoef(data)  # correlation matrix
+    
+    data_train = data_train.T
+    corr = np.corrcoef(data_train)  # correlation matrix
     w, v = np.linalg.eig(corr) # eigen values & eigen vectors
     print w
-    data = data.T
-    """
-
+    data_train = data_train.T
+    print "eigen values are shown above"
+    
     data_train_2 = pd.get_dummies(pd.DataFrame(data_train))
     data_test_2 = pd.get_dummies(pd.DataFrame(data_test))
     
@@ -580,7 +762,6 @@ def main():
     y_pred = classifier.predict(X_test)
 
     from sklearn.metrics import confusion_matrix
-    print "We done something"
     confusion_matrix = confusion_matrix(y_test, y_pred)
     print confusion_matrix
     print 'Accuracy of logistic regression classifier on test set: {:.2f}'.format(classifier.score(X_test, y_test))
